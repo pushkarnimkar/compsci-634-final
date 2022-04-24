@@ -12,6 +12,7 @@ import abc
 import coresets
 from sklearn.exceptions import NotFittedError
 from tqdm.auto import tqdm
+from algorithms import WeightedKMeans
 
 
 def random_sampling(classifier, X_pool, n_instances=10):
@@ -54,6 +55,33 @@ class GreedyHittingSetSampling(SamplingMethod):
 
 
 class KMeansCoresetSampling(SamplingMethod):
+    @staticmethod
+    def plot_kmeans(kmc: coresets.KMeansCoreset, n_instances: int, x_pool: np.ndarray):
+        cs, ws = kmc.generate_coreset(n_instances)
+        km = WeightedKMeans()
+        km.fit(cs, ws)
+        x_min, x_max = x_pool[:, 0].min(), x_pool[:, 0].max()
+        y_min, y_max = x_pool[:, 1].min(), x_pool[:, 1].max()
+        xs = np.linspace(1.1 * x_min, 1.1 * x_max, 300)
+        ys = np.linspace(1.1 * y_min, 1.1 * y_max, 300)
+        xx, yy = np.meshgrid(xs, ys)
+        Z, _ = km.predict(np.c_[xx.ravel(), yy.ravel()])
+
+        # Put the result into a color plot
+        Z = Z.reshape(xx.shape)
+        plt.figure(1, figsize=(8, 6))
+        plt.pcolormesh(xx, yy, Z, cmap=plt.cm.Paired, alpha=0.4)
+        plt.show()
+
+    @staticmethod
+    def plot_uncertainty(classifier, x_pool):
+        ys = classifier.predict(x_pool)
+        for y in np.unique(ys):
+            dist = x_pool[ys == y]
+            proba = classifier.predict_proba(dist)
+            uncertainty = stats.entropy(proba, axis=1)
+            plt.scatter(dist[:, 0], dist[:, 1], s=80 * (0.1 + uncertainty))
+
     def sample(self, classifier, x_pool, n_instances=1):
         try:
             proba = classifier.predict_proba(x_pool)
