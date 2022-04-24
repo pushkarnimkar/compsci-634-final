@@ -11,6 +11,7 @@ from scipy import spatial
 import abc
 import coresets
 from sklearn.exceptions import NotFittedError
+from tqdm.auto import tqdm
 
 
 def random_sampling(classifier, X_pool, n_instances=10):
@@ -81,6 +82,8 @@ def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
         learner = ActiveLearner(
             estimator=estimator, query_strategy=sampler.sample
         )
+    elif method == 'random':
+        learner = ActiveLearner(estimator=estimator, query_strategy=random_sampling)
     else:
         learner = ActiveLearner(
             estimator=estimator, query_strategy=uncertainty_sampling
@@ -108,24 +111,54 @@ def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
                 cols.append(col)
             y_proba = np.hstack(cols)
 
-        score = roc_auc_score(y_test, y_proba, multi_class='ovr')
+        y_pred = np.argmax(y_proba, axis=1) + 1
+        # score = roc_auc_score(y_test, y_proba, multi_class='ovr')
+        score = accuracy_score(y_test, y_pred)
         progress.append(score)
-    return learner, mask_sampled, progress
+    return learner, mask_sampled, np.array(progress)
 
 
 def main():
     xs, ys = double_mickey(seed=1000, majority_var=0.16, minority_var=0.04)
     x_train, x_test, y_train, y_test = train_test_split(xs, ys, train_size=0.8, stratify=ys)
 
-    learner, mask_sampled, progress_kmeans_coreset = train_learner(
-        'kmeans_coreset', x_train, y_train, x_test, y_test
-    )
-    learner, mask_sampled, progress_greedy_hitting_set = train_learner(
-        'greedy_hitting_set', x_train, y_train, x_test, y_test
-    )
-    plt.plot(progress_greedy_hitting_set, label='greedy_hitting_set', marker='o')
-    plt.plot(progress_kmeans_coreset, label='kmeans_coreset', marker='o')
+    (progress_kmeans_coreset, progress_random,
+     progress_greedy_hitting_set, progress_uncertainty) = [], [], [], []
+    for _ in tqdm(range(100)):
+        learner, mask_sampled, progress_kmeans_coreset_ = train_learner(
+            'kmeans_coreset', x_train, y_train, x_test, y_test
+        )
+        progress_kmeans_coreset.append(progress_kmeans_coreset_)
+        learner, mask_sampled, progress_greedy_hitting_set_ = train_learner(
+            'greedy_hitting_set', x_train, y_train, x_test, y_test
+        )
+        progress_greedy_hitting_set.append(progress_greedy_hitting_set_)
+        learner, mask_sampled, progress_uncertainty_ = train_learner(
+            'uncertainty', x_train, y_train, x_test, y_test
+        )
+        progress_uncertainty.append(progress_uncertainty_)
+        learner, mask_sampled, progress_random_ = train_learner(
+            'random', x_train, y_train, x_test, y_test
+        )
+        progress_random.append(progress_random_)
+
+    progress_kmeans_coreset = np.mean(progress_kmeans_coreset, axis=0)
+    progress_greedy_hitting_set = np.mean(progress_greedy_hitting_set, axis=0)
+    progress_uncertainty = np.mean(progress_uncertainty, axis=0)
+    progress_random = np.mean(progress_random, axis=0)
+
+    bs = np.arange(10, 110, 10)
+    plt.plot(bs, progress_greedy_hitting_set,
+             label='Hitting Set', marker='o')
+    plt.plot(bs, progress_kmeans_coreset, label='k-Means Coreset', marker='o')
+    plt.plot(bs, progress_uncertainty, label='Uncertainty', marker='o')
+    plt.plot(bs, progress_random, label='Random', marker='o')
+    plt.title('Comparison of active sampling methods')
+    plt.xlabel('Number of labels queried')
+    plt.ylabel('Accuracy score')
     plt.legend()
+    plt.grid()
+
     plt.show()
 
     # for y in np.unique(ys):
