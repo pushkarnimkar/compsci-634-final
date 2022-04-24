@@ -56,7 +56,9 @@ class GreedyHittingSetSampling(SamplingMethod):
 
 class KMeansCoresetSampling(SamplingMethod):
     @staticmethod
-    def plot_kmeans(kmc: coresets.KMeansCoreset, n_instances: int, x_pool: np.ndarray):
+    def plot_kmeans(kmc: coresets.KMeansCoreset, n_instances: int,
+                    x_pool: np.ndarray, classifier):
+
         cs, ws = kmc.generate_coreset(n_instances)
         km = WeightedKMeans()
         km.fit(cs, ws)
@@ -70,17 +72,21 @@ class KMeansCoresetSampling(SamplingMethod):
         # Put the result into a color plot
         Z = Z.reshape(xx.shape)
         plt.figure(1, figsize=(8, 6))
-        plt.pcolormesh(xx, yy, Z, cmap=plt.cm.Paired, alpha=0.4)
-        plt.show()
+        plt.pcolormesh(xx, yy, Z, cmap=plt.cm.Paired, alpha=0.5)
 
-    @staticmethod
-    def plot_uncertainty(classifier, x_pool):
-        ys = classifier.predict(x_pool)
-        for y in np.unique(ys):
-            dist = x_pool[ys == y]
-            proba = classifier.predict_proba(dist)
+        try:
+            proba = classifier.predict_proba(x_pool)
             uncertainty = stats.entropy(proba, axis=1)
-            plt.scatter(dist[:, 0], dist[:, 1], s=80 * (0.1 + uncertainty))
+            plt.scatter(x_pool[:, 0], x_pool[:, 1], s=80 * (0.1 + uncertainty),
+                        color='black', alpha=0.25, label='Uncertainty')
+        except NotFittedError:
+            pass
+
+        plt.scatter(cs[:, 0], cs[:, 1],
+                    marker='x', s=100, color='black', label='Selected samples')
+        plt.legend()
+        plt.title('k-Means Coreset samples')
+        plt.show()
 
     def sample(self, classifier, x_pool, n_instances=1):
         try:
@@ -90,6 +96,7 @@ class KMeansCoresetSampling(SamplingMethod):
             uncertainty = np.ones(x_pool.shape[0])
         adjusted = 0.1 + 0.9 * uncertainty
         kmc = coresets.KMeansCoreset(x_pool, w=adjusted)
+        # self.plot_kmeans(kmc, n_instances, x_pool, classifier)
         return kmc.coreset_indices(n_instances)
 
 
@@ -139,9 +146,9 @@ def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
                 cols.append(col)
             y_proba = np.hstack(cols)
 
-        y_pred = np.argmax(y_proba, axis=1) + 1
-        # score = roc_auc_score(y_test, y_proba, multi_class='ovr')
-        score = accuracy_score(y_test, y_pred)
+        # y_pred = np.argmax(y_proba, axis=1) + 1
+        score = roc_auc_score(y_test, y_proba, multi_class='ovr')
+        # score = accuracy_score(y_test, y_pred)
         progress.append(score)
     return learner, mask_sampled, np.array(progress)
 
@@ -183,7 +190,7 @@ def main():
     plt.plot(bs, progress_random, label='Random', marker='o')
     plt.title('Comparison of active sampling methods')
     plt.xlabel('Number of labels queried')
-    plt.ylabel('Accuracy score')
+    plt.ylabel('ROC-AUC score')
     plt.legend()
     plt.grid()
 
