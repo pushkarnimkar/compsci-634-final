@@ -117,26 +117,33 @@ def main():
     xs, ys = double_mickey(seed=1000, majority_var=0.16, minority_var=0.04)
     x_train, x_test, y_train, y_test = train_test_split(xs, ys, train_size=0.8, stratify=ys)
 
-    learner, mask_sampled, progress = train_learner(
+    learner, mask_sampled, progress_kmeans_coreset = train_learner(
         'kmeans_coreset', x_train, y_train, x_test, y_test
     )
-
-    for y in np.unique(ys):
-        dist = xs[ys == y]
-        proba = learner.predict_proba(dist)
-        uncertainty = stats.entropy(proba, axis=1)
-        plt.scatter(dist[:, 0], dist[:, 1], s=80 * (0.1 + uncertainty))
-
-    y_proba = learner.predict_proba(xs)
-    y_pred = learner.predict(xs)
-    incorrect = xs[ys != y_pred]
-    plt.scatter(incorrect[:, 0], incorrect[:, 1], facecolor='none', edgecolors='black', s=89)
-
-    x_known = x_train[mask_sampled]
-    plt.scatter(x_known[:, 0], x_known[:, 1], marker='x', color='black')
+    learner, mask_sampled, progress_greedy_hitting_set = train_learner(
+        'greedy_hitting_set', x_train, y_train, x_test, y_test
+    )
+    plt.plot(progress_greedy_hitting_set, label='greedy_hitting_set', marker='o')
+    plt.plot(progress_kmeans_coreset, label='kmeans_coreset', marker='o')
+    plt.legend()
     plt.show()
 
-    print(roc_auc_score(ys, y_proba, multi_class='ovr'))
+    # for y in np.unique(ys):
+    #     dist = xs[ys == y]
+    #     proba = learner.predict_proba(dist)
+    #     uncertainty = stats.entropy(proba, axis=1)
+    #     plt.scatter(dist[:, 0], dist[:, 1], s=80 * (0.1 + uncertainty))
+    #
+    # y_proba = learner.predict_proba(xs)
+    # y_pred = learner.predict(xs)
+    # incorrect = xs[ys != y_pred]
+    # plt.scatter(incorrect[:, 0], incorrect[:, 1], facecolor='none', edgecolors='black', s=89)
+    #
+    # x_known = x_train[mask_sampled]
+    # plt.scatter(x_known[:, 0], x_known[:, 1], marker='x', color='black')
+    # plt.show()
+    #
+    # print(roc_auc_score(ys, y_proba, multi_class='ovr'))
 
 
 if __name__ == '__main__':
