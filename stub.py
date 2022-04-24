@@ -1,18 +1,16 @@
 from datagen import double_mickey
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
 from modAL import ActiveLearner
-from modAL.uncertainty import entropy_sampling, uncertainty_sampling
+from modAL.uncertainty import uncertainty_sampling
 from scipy import spatial
 import abc
-
-
-def dasgupta_hsu_sampling():
-    pass
+import coresets
+from sklearn.exceptions import NotFittedError
 
 
 def random_sampling(classifier, X_pool, n_instances=10):
@@ -54,24 +52,74 @@ class GreedyHittingSetSampling(SamplingMethod):
         return np.array(indices)
 
 
-def main():
-    xs, ys = double_mickey(seed=1000, majority_var=0.16, minority_var=0.04)
-    x_train, x_test, y_train, y_test = train_test_split(xs, ys, train_size=0.8, stratify=ys)
+class KMeansCoresetSampling(SamplingMethod):
+    def sample(self, classifier, x_pool, n_instances=1):
+        try:
+            proba = classifier.predict_proba(x_pool)
+            uncertainty = stats.entropy(proba, axis=1)
+        except NotFittedError:
+            uncertainty = np.ones(x_pool.shape[0])
+        adjusted = 0.1 + 0.9 * uncertainty
+        kmc = coresets.KMeansCoreset(x_pool, w=adjusted)
+        return kmc.coreset_indices(n_instances)
+
+
+def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
     mask_sampled = np.zeros_like(y_train, dtype=bool)
     indices = np.arange(mask_sampled.shape[0])
-    sampler = GreedyHittingSetSampling(x_train, mask_sampled)
 
-    learner = ActiveLearner(
-        estimator=LogisticRegression(C=np.inf, max_iter=1000),
-        query_strategy=sampler.sample,
-    )
+    if estimator is None:
+        estimator = LogisticRegression(C=np.inf, max_iter=1000)
 
-    batch_size = 10
+    if method == 'greedy_hitting_set':
+        sampler = GreedyHittingSetSampling(x_train, mask_sampled)
+        learner = ActiveLearner(
+            estimator=estimator, query_strategy=sampler.sample
+        )
+    elif method == 'kmeans_coreset':
+        sampler = KMeansCoresetSampling()
+        learner = ActiveLearner(
+            estimator=estimator, query_strategy=sampler.sample
+        )
+    else:
+        learner = ActiveLearner(
+            estimator=estimator, query_strategy=uncertainty_sampling
+        )
+
+    batch_size, progress = 10, []
     for batch in range(10):
         x_pool, pool_idx = x_train[~mask_sampled], indices[~mask_sampled]
         query_idx, _ = learner.query(x_pool, n_instances=batch_size)
         mask_sampled[pool_idx[query_idx]] = True
         learner.teach(x_train[mask_sampled], y_train[mask_sampled])
+
+        y_proba = learner.predict_proba(x_test)
+        unique_y_sampled = np.unique(y_train[mask_sampled])
+        unique_y_train = np.unique(y_train)
+
+        if unique_y_train.shape[0] != unique_y_sampled.shape[0]:
+            cols = []
+            for i in unique_y_train:
+                if i in unique_y_sampled:
+                    loc = np.where(i == unique_y_sampled)[0]
+                    col = y_proba[:, loc]
+                else:
+                    col = np.zeros(y_proba.shape[0]).reshape(-1, 1)
+                cols.append(col)
+            y_proba = np.hstack(cols)
+
+        score = roc_auc_score(y_test, y_proba, multi_class='ovr')
+        progress.append(score)
+    return learner, mask_sampled, progress
+
+
+def main():
+    xs, ys = double_mickey(seed=1000, majority_var=0.16, minority_var=0.04)
+    x_train, x_test, y_train, y_test = train_test_split(xs, ys, train_size=0.8, stratify=ys)
+
+    learner, mask_sampled, progress = train_learner(
+        'kmeans_coreset', x_train, y_train, x_test, y_test
+    )
 
     for y in np.unique(ys):
         dist = xs[ys == y]
@@ -79,6 +127,7 @@ def main():
         uncertainty = stats.entropy(proba, axis=1)
         plt.scatter(dist[:, 0], dist[:, 1], s=80 * (0.1 + uncertainty))
 
+    y_proba = learner.predict_proba(xs)
     y_pred = learner.predict(xs)
     incorrect = xs[ys != y_pred]
     plt.scatter(incorrect[:, 0], incorrect[:, 1], facecolor='none', edgecolors='black', s=89)
@@ -87,7 +136,7 @@ def main():
     plt.scatter(x_known[:, 0], x_known[:, 1], marker='x', color='black')
     plt.show()
 
-    print(accuracy_score(ys, y_pred))
+    print(roc_auc_score(ys, y_proba, multi_class='ovr'))
 
 
 if __name__ == '__main__':
