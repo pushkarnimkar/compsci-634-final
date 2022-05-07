@@ -29,7 +29,7 @@ def double_mickey(minority_var=0.05, majority_var=0.2,
 
 
 def main():
-    xs, ys = double_mickey()
+    xs, ys = double_mickey(seed=1000, majority_var=0.16, minority_var=0.04)
     for y in np.unique(ys):
         dist = xs[ys == y]
         plt.scatter(dist[:, 0], dist[:, 1])
