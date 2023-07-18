@@ -95,9 +95,20 @@ class KMeansCoresetSampling(SamplingMethod):
         except NotFittedError:
             uncertainty = np.ones(x_pool.shape[0])
         adjusted = 0.1 + 0.9 * uncertainty
-        kmc = coresets.KMeansCoreset(x_pool, w=adjusted)
+        kmc = coresets.KMeansCoreset(x_pool, n_clusters=8, w=adjusted)
         # self.plot_kmeans(kmc, n_instances, x_pool, classifier)
         return kmc.coreset_indices(n_instances)
+
+
+def plot_sampled(xs, ys, mask_sampled, method):
+    for y in np.unique(ys):
+        dist = xs[ys == y]
+        plt.scatter(dist[:, 0], dist[:, 1])
+
+    x_known = xs[mask_sampled]
+    plt.scatter(x_known[:, 0], x_known[:, 1], marker='x', color='black')
+    plt.title(f'Points sampled with {method} method')
+    plt.show()
 
 
 def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
@@ -124,8 +135,8 @@ def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
             estimator=estimator, query_strategy=uncertainty_sampling
         )
 
-    batch_size, progress = 10, []
-    for batch in range(10):
+    batch_size, progress = 24, []
+    for batch in range(6):
         x_pool, pool_idx = x_train[~mask_sampled], indices[~mask_sampled]
         query_idx, _ = learner.query(x_pool, n_instances=batch_size)
         mask_sampled[pool_idx[query_idx]] = True
@@ -146,10 +157,12 @@ def train_learner(method, x_train, y_train, x_test, y_test, estimator=None):
                 cols.append(col)
             y_proba = np.hstack(cols)
 
-        # y_pred = np.argmax(y_proba, axis=1) + 1
-        score = roc_auc_score(y_test, y_proba, multi_class='ovr')
-        # score = accuracy_score(y_test, y_pred)
-        progress.append(score)
+        y_pred = np.argmax(y_proba, axis=1) + 1
+        roc_auc = roc_auc_score(y_test, y_proba, multi_class='ovr')
+        accuracy = accuracy_score(y_test, y_pred)
+        progress.append((accuracy, roc_auc, unique_y_sampled.shape[0]))
+
+    # plot_sampled(x_train, y_train, mask_sampled, method)
     return learner, mask_sampled, np.array(progress)
 
 
@@ -177,23 +190,48 @@ def main():
         )
         progress_random.append(progress_random_)
 
+    # accuracy, roc_auc, unique_y_sampled.shape[0]
     progress_kmeans_coreset = np.mean(progress_kmeans_coreset, axis=0)
     progress_greedy_hitting_set = np.mean(progress_greedy_hitting_set, axis=0)
     progress_uncertainty = np.mean(progress_uncertainty, axis=0)
     progress_random = np.mean(progress_random, axis=0)
 
-    bs = np.arange(10, 110, 10)
-    plt.plot(bs, progress_greedy_hitting_set,
+    bs = np.arange(24, 168, 24)
+
+    plt.plot(bs, progress_greedy_hitting_set[:, 0],
              label='Hitting Set', marker='o')
-    plt.plot(bs, progress_kmeans_coreset, label='k-Means Coreset', marker='o')
-    plt.plot(bs, progress_uncertainty, label='Uncertainty', marker='o')
-    plt.plot(bs, progress_random, label='Random', marker='o')
+    plt.plot(bs, progress_kmeans_coreset[:, 0], label='k-Means Coreset', marker='o')
+    plt.plot(bs, progress_uncertainty[:, 0], label='Uncertainty', marker='o')
+    plt.plot(bs, progress_random[:, 0], label='Random', marker='o')
     plt.title('Comparison of active sampling methods')
     plt.xlabel('Number of labels queried')
-    plt.ylabel('ROC-AUC score')
+    plt.ylabel('Accuracy score')
     plt.legend()
     plt.grid()
+    plt.show()
 
+    plt.plot(bs, progress_greedy_hitting_set[:, 1],
+             label='Hitting Set', marker='o')
+    plt.plot(bs, progress_kmeans_coreset[:, 1], label='k-Means Coreset', marker='o')
+    plt.plot(bs, progress_uncertainty[:, 1], label='Uncertainty', marker='o')
+    plt.plot(bs, progress_random[:, 1], label='Random', marker='o')
+    plt.title('Comparison of active sampling methods')
+    plt.xlabel('Number of labels queried')
+    plt.ylabel('ROC AUC score')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    plt.plot(bs, progress_greedy_hitting_set[:, 2],
+             label='Hitting Set', marker='o')
+    plt.plot(bs, progress_kmeans_coreset[:, 2], label='k-Means Coreset', marker='o')
+    plt.plot(bs, progress_uncertainty[:, 2], label='Uncertainty', marker='o')
+    plt.plot(bs, progress_random[:, 2], label='Random', marker='o')
+    plt.title('Comparison of active sampling methods')
+    plt.xlabel('Number of labels queried')
+    plt.ylabel('Average classes discovered')
+    plt.legend()
+    plt.grid()
     plt.show()
 
     # for y in np.unique(ys):
